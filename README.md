@@ -19,6 +19,8 @@ This project implements an **EMG (Electromyography)** monitoring system using th
 | **LO-** | **GPIO 18** | Leads-off Detect - |
 | **LO+** | **GPIO 19** | Leads-off Detect + |
 
+![Wiring Diagram](images/setup.jpg)
+
 > **Note:** If using a breadboard, ensure that the power rails (+ and -) are bridged between the top and bottom sections to provide consistent power to both the ESP32 and the AD8232.
 
 ## Electrode Placement
