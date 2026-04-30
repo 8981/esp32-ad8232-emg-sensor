@@ -1,72 +1,86 @@
-//Configuration for 4 sensors
-const int NUM_SENSORS = 4;
+// ===== EMG 3 sensors: stable feature extraction for rest/fist (NO notch) =====
 
-const int SENSOR_PINS[NUM_SENSORS] = {36, 39, 34, 35};
-const int LO_PLUS_PINS[NUM_SENSORS] = {19, 21, 23, 26};
-const int LO_MINUS_PINS[NUM_SENSORS] = {18, 22, 25, 27};
+const int NUM_SENSORS = 3;
+const int SENSOR_PINS[NUM_SENSORS] = {36, 39, 34};
 
-//Satus of each sensors
-float dynOff[NUM_SENSORS] = {2048, 2048, 2048, 2048};
-float envelope[NUM_SENSORS] = {0, 0, 0, 0};
+// Sampling: 500 Hz
+const uint32_t PERIOD_US = 2000UL;
 
-//Filter 50Gh for each sensor
-const float n_a1 = -1.7911f, n_a2 = 0.9803f;
-const float n_b0 = 0.9901f, n_b1 = -1.7911f, n_b2 = 0.9901f;
-float fx0[NUM_SENSORS] = {0}, fx1[NUM_SENSORS] = {0}, fx2[NUM_SENSORS] = {0};
-float fy0[NUM_SENSORS] = {0}, fy1[NUM_SENSORS] = {0}, fy2[NUM_SENSORS] = {0}; 
+// ADC averaging
+const int ADC_AVG = 4;
 
-static unsigned long lastT = 0;
+// Feature window: 25 samples * 2ms = 50ms => ~20 rows/sec
+const int WINDOW_SAMPLES = 25;
+
+// label: 0 rest, 1 fist, 2 none
+int label = 2;
+
+// Dynamic offsets
+float dynOff[NUM_SENSORS] = {2048, 2048, 2048};
+
+// Window accumulators
+float sumAbs[NUM_SENSORS] = {0, 0, 0};
+int winCnt = 0;
+
+// Timing
+uint32_t lastSampleT = 0;
+uint32_t sampleIdx = 0;
+
+void handleSerialLabel() {
+  while (Serial.available()) {
+    char c = (char)Serial.read();
+    if (c == 'r' || c == 'R') label = 0;
+    else if (c == 'f' || c == 'F') label = 1;
+    else if (c == 'n' || c == 'N') label = 2;
+  }
+}
 
 void setup() {
   Serial.begin(115200);
   analogReadResolution(12);
   setCpuFrequencyMhz(240);
 
-  for (int i = 0; i < NUM_SENSORS; i++) {
-    pinMode(LO_PLUS_PINS[i], INPUT);
-    pinMode(LO_MINUS_PINS[i], INPUT);
-  }
+  lastSampleT = micros();
+  Serial.println("idx,featAbs1,featAbs2,featAbs3,label");
 }
 
 void loop() {
-  //Process each sensor
-   for (int i = 0; i < NUM_SENSORS; i++) {
-    float emgOut = 0;
+  handleSerialLabel();
 
-    // Electrode contact check
-    if (digitalRead(LO_PLUS_PINS[i]) || digitalRead(LO_MINUS_PINS[i])) {
-      emgOut = 0;
-      // Dropping
-      dynOff[i] = 2048;
-      envelope[i] = 0;
-      fx0[i]=fx1[i]=fx2[i]=fy0[i]=fy1[i]=fy2[i]=0;
-    } else {
-      // Averaging ADCs
-      int raw = 0;
-      for (int j = 0; j < 4; j++) raw += analogRead(SENSOR_PINS[i]);
-      raw >>= 2;
+  // wait next 2ms tick
+  while ((uint32_t)(micros() - lastSampleT) < PERIOD_US) {}
+  lastSampleT = micros();
 
-      // Dynamic centering
-      dynOff[i] = dynOff[i] * 0.99f + raw * 0.01f;
-      float centered = raw - dynOff[i];
+  sampleIdx++;
 
-      // Filter 50Gh
-      fx2[i]=fx1[i]; fx1[i]=fx0[i]; fx0[i]=centered;
-      fy2[i]=fy1[i]; fy1[i]=fy0[i];
-      fy0[i] = n_b0*fx0[i] + n_b1*fx1[i] + n_b2*fx2[i] + n_a1*fy1[i] + n_a2*fy2[i];
+  // acquire + dynamic centering + abs
+  for (int i = 0; i < NUM_SENSORS; i++) {
+    int raw = 0;
+    for (int j = 0; j < ADC_AVG; j++) raw += analogRead(SENSOR_PINS[i]);
+    raw /= ADC_AVG;
 
-      // Envelope (smooth)
-      envelope[i] = 0.05f * fabs(fy0[i]) + 0.95f * envelope[i];
-      emgOut = envelope[i] * 5;
-    }
+    dynOff[i] = dynOff[i] * 0.99f + raw * 0.01f;
+    float centered = (float)raw - dynOff[i];
 
-    // Comma-separated output
-    Serial.print(emgOut);
-    if (i < NUM_SENSORS - 1) Serial.print(",");
+    sumAbs[i] += fabs(centered);
   }
-  Serial.println();
 
-  // Timing 500 Gh
-  while (micros() - lastT < 2000UL);
-  lastT = micros();
+  winCnt++;
+
+  // every window print features
+  if (winCnt >= WINDOW_SAMPLES) {
+    float feat1 = sumAbs[0] / (float)winCnt;
+    float feat2 = sumAbs[1] / (float)winCnt;
+    float feat3 = sumAbs[2] / (float)winCnt;
+
+    // печать ТОЛЬКО числа + label (без текста)
+    Serial.print(sampleIdx); Serial.print(",");
+    Serial.print(feat1, 3); Serial.print(",");
+    Serial.print(feat2, 3); Serial.print(",");
+    Serial.print(feat3, 3); Serial.print(",");
+    Serial.println(label);
+
+    winCnt = 0;
+    sumAbs[0] = sumAbs[1] = sumAbs[2] = 0;
+  }
 }
