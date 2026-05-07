@@ -66,6 +66,9 @@ Each AD8232 sensor has its own analog output pin and optional lead-off detection
 
 ![Bandage EMG Electrodes](images/bandage_emg_electrodes.jpg)
 
+## Demo Video
+[Watch demo video](videos/emg_gazebo_demo.mp4)
+
 > **Important:** All three AD8232 modules must share the same **GND** with the ESP32.  
 > The AD8232 modules must be powered from **3.3V**, not 5V.
 
