@@ -6,12 +6,17 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 
-CSV = "emg_rest_fist.csv"
+CSV = "emg_rest_fist_v2.csv"
 
 df = pd.read_csv(CSV)
+
+feature_cols = ["m1","s1","a1","p1",
+                "m2","s2","a2","p2",
+                "m3","s3","a3","p3"]
+
 df = df[df["label"].isin([0, 1])].copy()
 
-X = df[["featAbs1", "featAbs2", "featAbs3"]].values
+X = df[feature_cols].values
 y = df["label"].values
 
 X_train, X_test, y_train, y_test = train_test_split(
@@ -20,7 +25,7 @@ X_train, X_test, y_train, y_test = train_test_split(
 
 model = make_pipeline(
     StandardScaler(),
-    LogisticRegression(max_iter=2000)
+    LogisticRegression(max_iter=4000, solver="lbfgs")
 )
 
 model.fit(X_train, y_train)

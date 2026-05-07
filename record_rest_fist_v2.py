@@ -1,72 +1,63 @@
 import serial, time, math
 
-PORT = "COM3"   # как у тебя: COM3
+PORT = "COM3"
 BAUD = 115200
-OUT_CSV = "emg_rest_fist.csv"
+OUT_CSV = "state_open_fist_v2.csv"
 
-REST_S = 3.0
-FIST_S = 3.0
-CYCLES = 6
+REST_S = 2.5
+FIST_S = 2.5
+CYCLES = 10
 
-ser = serial.Serial(PORT, BAUD, timeout=0.5)
+# v2 features: idx + 12 features + label = 14 cols
+FEATURES = ["m1","s1","a1","p1","m2","s2","a2","p2","m3","s3","a3","p3"]
+
+ser = serial.Serial(PORT, BAUD, timeout=1)
 time.sleep(1.0)
-
 ser.reset_input_buffer()
 
-lines = []
-header = None
+rows = []
 
-def read_lines_for_duration(seconds):
-    """Read as many valid lines as possible for given duration."""
-    end_t = time.time() + seconds
-    accepted = 0
-    last_label = None
-
+def read_for(duration_s, wanted_label):
+    end_t = time.time() + duration_s
+    got = 0
     while time.time() < end_t:
         line = ser.readline().decode(errors="ignore").strip()
-        if not line:
-            continue
-
-        if line.startswith("idx,"):
-            # header
+        if not line or line.startswith("idx,"):
             continue
 
         parts = line.split(",")
-        if len(parts) != 5:
+        if len(parts) != 14:
             continue
 
-        idx, a, b, c, lab = parts
         try:
-            fa = float(a); fb = float(b); fc = float(c); fl = int(float(lab))
-            if not (math.isfinite(fa) and math.isfinite(fb) and math.isfinite(fc)):
+            feats = [float(parts[i]) for i in range(1, 13)]  # 12 values
+            lab_in = int(float(parts[13]))  # label from ESP32 (not used)
+            if not all(math.isfinite(v) for v in feats):
                 continue
+
+            # We trust our commanded label instead of ESP32 label:
+            rows.append([*feats, wanted_label])
+            got += 1
         except:
-            continue
+            pass
+    return got
 
-        lines.append((idx, fa, fb, fc, fl))
-        accepted += 1
-        last_label = fl
-
-    return accepted, last_label
-
-print(f"Start recording on {PORT}. Close Serial Monitor!")
-
-for cyc in range(CYCLES):
-    print(f"\nCycle {cyc+1}/{CYCLES}: REST")
+for c in range(CYCLES):
+    print(f"\nCycle {c+1}/{CYCLES}: REST(open)")
     ser.write(b"r")
-    n, last_lab = read_lines_for_duration(REST_S)
-    print(f"  captured: {n} samples, last label: {last_lab}")
+    n = read_for(REST_S, wanted_label=0)
+    print("  captured:", n)
 
-    print(f"Cycle {cyc+1}/{CYCLES}: FIST")
+    print(f"Cycle {c+1}/{CYCLES}: FIST(closed)")
     ser.write(b"f")
-    n, last_lab = read_lines_for_duration(FIST_S)
-    print(f"  captured: {n} samples, last label: {last_lab}")
+    n = read_for(FIST_S, wanted_label=1)
+    print("  captured:", n)
 
 ser.close()
 
 with open(OUT_CSV, "w", encoding="utf-8") as f:
-    f.write("idx,featAbs1,featAbs2,featAbs3,label\n")
-    for (idx, fa, fb, fc, fl) in lines:
-        f.write(f"{idx},{fa},{fb},{fc},{fl}\n")
+    f.write(",".join(FEATURES) + ",label\n")
+    for r in rows:
+        f.write(",".join(map(str, r)) + "\n")
 
-print("\nSaved:", OUT_CSV, "rows:", len(lines))
+print("\nSaved:", OUT_CSV, "rows:", len(rows))

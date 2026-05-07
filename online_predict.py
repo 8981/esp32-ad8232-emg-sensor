@@ -1,59 +1,72 @@
-import serial
-import joblib
-from collections import deque
+import serial, joblib
+import numpy as np
 
-PORT = "COM3"   # как у тебя
+PORT = "COM3"
 BAUD = 115200
-
 MODEL_FILE = "rest_fist_model.joblib"
 
+NAMES = ["REST", "FIST"]
+
 model = joblib.load(MODEL_FILE)
+N = int(model.n_features_in_)
+print(f"Model expects {N} features (v2 = 12).")
 
-# сглаживание: решение по последним N предсказаниям
-N_SMOOTH = 5
-hist = deque(maxlen=N_SMOOTH)
+ser = serial.Serial(PORT, BAUD, timeout=1)
 
-print(f"Online prediction started on {PORT}.")
-print("Try REST / FIST. Press Ctrl+C to stop.\n")
+# --- smoothing + hysteresis ---
+ALPHA = 0.2          # EMA smoothing for p(FIST)
+TH_FIST = 0.62      # switch REST->FIST only if confident
+TH_REST = 0.48      # switch FIST->REST only if clearly confident for REST
+MIN_HITS = 3        # require N consecutive satisfied decisions
+
+state = 0  # 0 REST, 1 FIST
+hits = 0
 
 def parse_line(line: str):
-    """
-    Ожидаем: idx,featAbs1,featAbs2,featAbs3,label
-    Возвращаем (x1,x2,x3) или None
-    """
     parts = line.strip().split(",")
-    if len(parts) != 5:
+    # v2 format: idx + 12 features + label => 14 columns
+    if len(parts) != 14:
         return None
-    _, a, b, c, _lab = parts
     try:
-        return [float(a), float(b), float(c)]
+        # features are columns 1..12
+        feats = [float(parts[i]) for i in range(1, 13)]
+        return feats
     except:
         return None
 
-ser = serial.Serial(PORT, BAUD, timeout=1)
+ema_p_fist = 0.0
+
+print("Online REST/FIST (hysteresis). Ctrl+C to stop.\n")
+
 try:
     while True:
         line = ser.readline().decode(errors="ignore")
         if not line:
             continue
-
         x = parse_line(line)
         if x is None:
             continue
 
-        pred = model.predict([x])[0]  # 0=rest, 1=fist
-        hist.append(pred)
+        proba = model.predict_proba([x])[0]   # [p_rest, p_fist]
+        p_fist = float(proba[1])
+        ema_p_fist = ALPHA * p_fist + (1 - ALPHA) * ema_p_fist
 
-        # majority vote
-        rest_cnt = sum(1 for p in hist if p == 0)
-        fist_cnt = sum(1 for p in hist if p == 1)
-        if fist_cnt > rest_cnt:
-            decision = "FIST"
-            out_label = 1
+        # hysteresis decision
+        if state == 0:  # REST -> FIST
+            cond = ema_p_fist >= TH_FIST
+        else:            # FIST -> REST
+            cond = ema_p_fist <= TH_REST
+
+        if cond:
+            hits += 1
         else:
-            decision = "REST"
-            out_label = 0
+            hits = 0
 
-        print(f"{decision} (pred={pred}, smooth={list(hist)})  feats={x}")
+        if hits >= MIN_HITS:
+            state = 1 - state  # toggle
+            hits = 0
+
+        decision = NAMES[state]
+        print(f"{decision} | p_fist={p_fist:.3f} ema={ema_p_fist:.3f} hits={hits}")
 finally:
     ser.close()
