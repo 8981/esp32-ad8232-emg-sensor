@@ -66,8 +66,13 @@ Each AD8232 sensor has its own analog output pin and optional lead-off detection
 
 ![Bandage EMG Electrodes](images/bandage_emg_electrodes.jpg)
 
-## Demo Video
-[Watch demo video](videos/emg_gazebo_demo.mp4)
+### Demo Video
+The video demonstrates the full real-time pipeline:
+
+```text
+EMG signal → ESP32 feature extraction → REST/FIST prediction → ROS2 → Gazebo gripper control
+```
+[Watch EMG REST/FIST to Gazebo gripper demo on YouTube](https://youtube.com/shorts/iMcEaw4SLKo?feature=share)
 
 > **Important:** All three AD8232 modules must share the same **GND** with the ESP32.  
 > The AD8232 modules must be powered from **3.3V**, not 5V.
