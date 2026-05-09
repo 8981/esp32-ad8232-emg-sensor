@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ROS2 / colcon generated files
+ros2_ws/build/
+ros2_ws/install/
+ros2_ws/log/
+
+# OS / IDE
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Large / generated artifacts
+*.bag
+*.db3

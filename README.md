@@ -27,10 +27,10 @@ The current implementation successfully demonstrates a full real-time EMG-to-Gaz
 ```text
 ESP32 + 3x AD8232
 → EMG v2 feature extraction
-→ REST/FIST machine learning classification
-→ ROS2 Python node in WSL2
-→ /gripper_controller/commands
+→ REST/FIST machine learning model
+→ ROS2 Python node
 → Gazebo gripper open/close
+→ MQTT event streaming
 ```
 
 The system classifies two hand states:
@@ -677,34 +677,43 @@ Mapping:
 
 ## Creating the ROS2 Workspace
 
-Create the ROS2 workspace inside the Linux filesystem:
+The ROS2 workspace is now integrated directly into the main project structure.
+
+Project root:
 
 ```bash
-mkdir -p ~/emg_ws/src
-cd ~/emg_ws/src
+/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor
 ```
 
-Create the ROS2 Python package:
+Create the ROS2 workspace structure:
 
 ```bash
-ros2 pkg create emg_gripper_control --build-type ament_python --dependencies rclpy std_msgs
+cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor"
+
+mkdir -p ros2_ws/src
+```
+
+The ROS2 package should be placed inside:
+
+```text
+ros2_ws/src/emg_gripper_control
 ```
 
 The workspace structure should look like this:
 
 ```text
-~/emg_ws
-└── src
-    └── emg_gripper_control
-        ├── emg_gripper_control
-        │   ├── __init__.py
-        │   └── emg_to_gripper_node.py
-        ├── package.xml
-        ├── setup.cfg
-        └── setup.py
+esp32-ad8232-emg-sensor
+├── ros2_ws
+│   └── src
+│       └── emg_gripper_control
+├── model
+├── data
+├── firmware
+├── scripts
+└── cloud_iot
 ```
 
-> **Note:** The ROS2 workspace should be created inside `~/emg_ws`, not inside `/mnt/d/...`.  
+> **Note:** The ROS2 workspace should be created inside `ros2_ws`, not inside `/mnt/d/...`.  
 > Building ROS2 packages is more stable and faster inside the Linux filesystem.
 
 ---
@@ -720,11 +729,14 @@ sudo apt install -y python3-colcon-common-extensions
 Build the workspace:
 
 ```bash
-cd ~/emg_ws
+cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor/ros2_ws"
+
+source /opt/ros/jazzy/setup.bash
+
 colcon build
+
 source install/setup.bash
 ```
-
 ---
 
 ## Running the Complete System
@@ -733,15 +745,36 @@ source install/setup.bash
 
 ```bash
 source /opt/ros/jazzy/setup.bash
+
 ros2 launch gz_ros2_control_demos gripper_mimic_joint_example_position.launch.py
 ```
 
-### Terminal 2: Start the EMG ROS2 Node
+---
+
+### Terminal 2: Start MQTT Listener
 
 ```bash
-cd ~/emg_ws
+cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor"
+
+python3 cloud_iot/mqtt/listener.py
+```
+
+Expected output:
+
+```text
+Received: {"prediction":"FIST", ...}
+```
+---
+
+### Terminal 3: Start the EMG ROS2 Node
+
+```bash
+cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor/ros2_ws"
+
 source /opt/ros/jazzy/setup.bash
+
 source install/setup.bash
+
 ros2 run emg_gripper_control emg_to_gripper
 ```
 
@@ -752,6 +785,7 @@ Loaded model: rest_fist_model_v2.joblib
 Model expects 12 features.
 Publishing to: /gripper_controller/commands
 Opened serial port: /dev/ttyUSB0
+MQTT connected: localhost:1883
 ```
 
 Expected behavior:
@@ -759,10 +793,9 @@ Expected behavior:
 ```text
 REST / relaxed hand → Gazebo gripper opens
 FIST / closed hand  → Gazebo gripper closes
+
+MQTT listener receives EMG prediction events.
 ```
-
----
-
 ## Common Issues
 
 ### COM Port or Serial Device Is Busy
