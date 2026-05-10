@@ -865,7 +865,23 @@ ros2 launch gz_ros2_control_demos gripper_mimic_joint_example_position.launch.py
 
 ---
 
-### Terminal 2: Start MQTT Listener
+### Terminal 2: Start Cloud IoT Infrastructure
+
+```bash
+cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor"
+
+docker compose -f cloud_iot/docker-compose.yml up -d
+```
+
+Expected services:
+
+- Mosquitto MQTT broker
+- Apache Kafka
+- Apache ZooKeeper
+
+---
+
+### Terminal 3: Start MQTT Listener (optional debug)
 
 ```bash
 cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor"
@@ -878,9 +894,27 @@ Expected output:
 ```text
 Received: {"prediction":"FIST", ...}
 ```
+
 ---
 
-### Terminal 3: Start the EMG ROS2 Node
+### Terminal 4: Start MQTT → Kafka Bridge
+
+```bash
+cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor"
+
+python3 cloud_iot/kafka/mqtt_to_kafka_bridge.py
+```
+
+Expected output:
+
+```text
+MQTT → Kafka bridge started.
+Forwarded to Kafka topic: emg_predictions
+```
+
+---
+
+### Terminal 5: Start the EMG ROS2 Node
 
 ```bash
 cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor/ros2_ws"
@@ -902,14 +936,7 @@ Opened serial port: /dev/ttyUSB0
 MQTT connected: localhost:1883
 ```
 
-Expected behavior:
-
-```text
-REST / relaxed hand → Gazebo gripper opens
-FIST / closed hand  → Gazebo gripper closes
-
-MQTT listener receives EMG prediction events.
-```
+---
 
 ## Common Issues
 
