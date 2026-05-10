@@ -20,17 +20,24 @@ The final system classifies two hand states — **REST** and **FIST** — and us
 
 ---
 
-## Current Result
+## Current Pipeline
 
 The current implementation successfully demonstrates a full real-time EMG-to-Gazebo control pipeline.
 
 ```text
-ESP32 + 3x AD8232
-→ EMG v2 feature extraction
-→ REST/FIST machine learning model
-→ ROS2 Python node
-→ Gazebo gripper open/close
-→ MQTT event streaming
+ESP32 + EMG Sensors
+        ↓
+Feature Extraction (ESP32)
+        ↓
+ROS2 EMG Node
+        ↓
+Machine Learning Gesture Classification
+        ↓
+Gazebo Gripper Control
+        ↓
+MQTT Streaming
+        ↓
+Kafka Streaming Pipeline
 ```
 
 The system classifies two hand states:
@@ -739,6 +746,113 @@ source install/setup.bash
 ```
 ---
 
+## MQTT Integration
+
+The ROS2 EMG node publishes gesture recognition events to an MQTT broker.
+
+MQTT topic:
+
+```text
+emg/prediction
+```
+
+Example payload:
+
+```json
+{
+  "prediction": "FIST",
+  "label": 1,
+  "command_value": 0.15,
+  "p_rest": 0.03,
+  "p_fist": 0.97,
+  "ema_fist": 0.91,
+  "timestamp": 1778349158.14
+}
+```
+
+The MQTT layer is used as the first streaming stage for the Cloud IoT pipeline.
+
+## Kafka Streaming Pipeline
+
+The project includes a Kafka streaming layer for real-time telemetry transport.
+
+Pipeline:
+
+```text
+ROS2 Node
+→ MQTT Broker
+→ MQTT-Kafka Bridge
+→ Kafka Topic
+```
+
+Kafka topic:
+
+```text
+emg_predictions
+```
+
+The Kafka layer allows scalable streaming, buffering, and future analytics integration.
+
+## Running the Cloud IoT Stack
+
+Start the infrastructure:
+
+```bash
+docker compose -f cloud_iot/docker-compose.yml up -d
+```
+
+Verify running containers:
+
+```bash
+docker ps
+```
+
+Expected services:
+
+- Mosquitto MQTT broker
+- Apache Kafka
+- Apache ZooKeeper
+
+## Running MQTT → Kafka Bridge
+
+Start the bridge:
+
+```bash
+python3 cloud_iot/kafka/mqtt_to_kafka_bridge.py
+```
+
+Expected output:
+
+```text
+MQTT → Kafka bridge started.
+Connected to MQTT broker.
+Forwarded to Kafka topic: emg_predictions
+```
+
+## Kafka Consumer Test
+
+Open Kafka consumer:
+
+```bash
+docker exec -it kafka bash
+```
+
+Inside the container:
+
+```bash
+kafka-console-consumer \
+--bootstrap-server localhost:9092 \
+--topic emg_predictions \
+--from-beginning
+```
+
+Expected output:
+
+```json
+{"prediction":"FIST", ...}
+{"prediction":"REST", ...}
+```
+
 ## Running the Complete System
 
 ### Terminal 1: Start Gazebo Gripper Demo
@@ -796,6 +910,7 @@ FIST / closed hand  → Gazebo gripper closes
 
 MQTT listener receives EMG prediction events.
 ```
+
 ## Common Issues
 
 ### COM Port or Serial Device Is Busy
