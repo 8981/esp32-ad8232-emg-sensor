@@ -17,27 +17,36 @@ The final system classifies two hand states — **REST** and **FIST** — and us
 - **Gazebo control**: Opens and closes a simulated gripper through `/gripper_controller/commands`.
 - **WSL2 support**: ESP32 is forwarded from Windows to Ubuntu WSL2 using `usbipd-win`.
 - **Lead-off detection pins reserved**: LO+/LO− pins are connected for all three sensors and can be used later to detect whether electrodes are properly attached.
+- **MQTT streaming**: Publishes real-time REST/FIST prediction events to an MQTT broker.
+- **Kafka pipeline**: Streams MQTT prediction events into Apache Kafka for scalable telemetry processing.
+- **InfluxDB storage**: Stores prediction telemetry as time-series data.
+- **Grafana dashboard**: Visualizes prediction probability, smoothed probability, gripper commands, and predicted labels.
+- **Experimental four-class classification**: Tests REST, FIST, WRIST_UP, and WRIST_DOWN recognition as an experimental extension.
 
 ---
 
 ## Current Pipeline
 
-The current implementation successfully demonstrates a full real-time EMG-to-Gazebo control pipeline.
+The current stable v1.0 implementation demonstrates a full real-time EMG-to-Gazebo and Cloud IoT pipeline.
 
 ```text
-ESP32 + EMG Sensors
+ESP32 + 3x AD8232 EMG Sensors
         ↓
-Feature Extraction (ESP32)
+Feature Extraction on ESP32
+        ↓
+REST/FIST Machine Learning Classification
         ↓
 ROS2 EMG Node
-        ↓
-Machine Learning Gesture Classification
         ↓
 Gazebo Gripper Control
         ↓
 MQTT Streaming
         ↓
 Kafka Streaming Pipeline
+        ↓
+InfluxDB Time-Series Storage
+        ↓
+Grafana Visualization
 ```
 
 The system classifies two hand states:
@@ -201,12 +210,11 @@ The recorder automatically sends commands to the ESP32:
 r → REST
 f → FIST
 ```
-
-For the experimental four-class version, a separate dataset is recorded:
+For the stable v1.0 version, the dataset file is:
 
 ```text
-emg_4classes_v1.csv
-
+emg_rest_fist_v2.csv
+```
 For the experimental four-class version, a separate dataset is recorded:
 
 ```text
@@ -726,8 +734,9 @@ WRIST_DOWN
 ---
 
 This mode uses the model:
+```text
 emg_4classes_rf_model_v1.joblib
-
+```
 ## Creating the ROS2 Workspace
 
 The ROS2 workspace is now integrated directly into the main project structure.
@@ -839,6 +848,59 @@ emg_predictions
 
 The Kafka layer allows scalable streaming, buffering, and future analytics integration.
 
+## InfluxDB Time-Series Storage
+
+The project includes an InfluxDB consumer that reads prediction events from Kafka and stores them as time-series data.
+
+Pipeline:
+
+```text
+Kafka Topic: emg_predictions
+→ Kafka-InfluxDB Consumer
+→ InfluxDB Bucket: emg-bucket
+```
+
+InfluxDB settings:
+
+Parameter	Value
+URL	http://localhost:8086
+Organization	emg-org
+Bucket	emg-bucket
+Token	emg-token
+
+The measurement used for prediction telemetry is:
+
+emg_prediction
+
+Stored fields include:
+
+label
+command_value
+p_rest
+p_fist
+ema_fist
+timestamp_source
+
+The prediction class is stored as a tag:
+
+prediction
+Grafana Visualization
+
+Grafana is used to visualize the real-time EMG prediction telemetry stored in InfluxDB.
+
+Grafana URL:
+
+http://localhost:3000
+
+InfluxDB datasource settings in Grafana:
+
+Setting	Value
+Query language	Flux
+URL	http://influxdb:8086
+Organization	emg-org
+Token	emg-token
+Default bucket	emg-bucket
+
 ## Running the Cloud IoT Stack
 
 Start the infrastructure:
@@ -853,11 +915,15 @@ Verify running containers:
 docker ps
 ```
 
+```markdown
 Expected services:
 
 - Mosquitto MQTT broker
 - Apache Kafka
 - Apache ZooKeeper
+- InfluxDB
+- Grafana
+```
 
 ## Running MQTT → Kafka Bridge
 
@@ -960,7 +1026,22 @@ Forwarded to Kafka topic: emg_predictions
 
 ---
 
-### Terminal 5: Start the EMG ROS2 Node
+### Terminal 5: Start Kafka → InfluxDB Consumer
+
+```bash
+cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor"
+
+python3 cloud_iot/influxdb/kafka_to_influxdb.py
+```
+```text
+Expected output:
+
+Kafka → InfluxDB consumer started.
+Waiting for Kafka messages...
+Written to InfluxDB: prediction=FIST, label=1, ...
+```
+
+### Terminal 6: Start the EMG ROS2 Node
 
 ```bash
 cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor/ros2_ws"
@@ -988,6 +1069,13 @@ For the experimental four-class ROS2 mode, the node loads:
 ```text
 emg_4classes_rf_model_v1.joblib
 ```
+
+### Terminal 7: Open Grafana Dashboard
+
+Open Grafana in the browser:
+
+```text
+http://localhost:3000
 ---
 
 ## Common Issues
@@ -1095,9 +1183,19 @@ In the tested Gazebo gripper model:
 0.0  → open gripper
 0.15 → close gripper
 ```
+```markdown
+The stable v1.0 pipeline also streams prediction events to the Cloud IoT stack:
 
+```text
+ROS2 Node
+→ MQTT Broker
+→ MQTT-Kafka Bridge
+→ Kafka Topic: emg_predictions
+→ Kafka-InfluxDB Consumer
+→ InfluxDB Bucket: emg-bucket
+→ Grafana Dashboard
+```
 ---
-
 ## License
 
 MIT License
