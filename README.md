@@ -73,7 +73,7 @@ The dataset structure remains unchanged because the input feature vector is stil
 
 ```text
 m1,s1,a1,p1,m2,s2,a2,p2,m3,s3,a3,p3,label
-
+```
 ## Hardware Connections (ESP32 DevKit V1)
 
 This project uses **three AD8232 modules** connected to one ESP32.  
