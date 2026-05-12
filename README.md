@@ -1076,6 +1076,7 @@ Open Grafana in the browser:
 
 ```text
 http://localhost:3000
+```
 ---
 
 ## Common Issues
