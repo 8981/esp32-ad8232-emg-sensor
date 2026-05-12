@@ -984,10 +984,10 @@ MQTT connected: localhost:1883
 
 ```markdown
 For the experimental four-class ROS2 mode, the node loads:
-
+```
 ```text
 emg_4classes_rf_model_v1.joblib
-
+```
 ---
 
 ## Common Issues
