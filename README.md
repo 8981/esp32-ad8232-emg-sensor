@@ -56,6 +56,24 @@ In the tested Gazebo gripper model:
 
 ---
 
+## Experimental Version 1.1 — Four-Class EMG Classification
+
+After implementing the stable REST/FIST pipeline in version 1.0, an experimental four-class classifier was tested.
+
+The additional movement classes are:
+
+| Label | Class | Description |
+| :--- | :--- | :--- |
+| `0` | REST | Relaxed hand |
+| `1` | FIST | Closed fist |
+| `2` | WRIST_UP | Wrist extension |
+| `3` | WRIST_DOWN | Wrist flexion |
+
+The dataset structure remains unchanged because the input feature vector is still based on three EMG sensors and 12 extracted features:
+
+```text
+m1,s1,a1,p1,m2,s2,a2,p2,m3,s3,a3,p3,label
+
 ## Hardware Connections (ESP32 DevKit V1)
 
 This project uses **three AD8232 modules** connected to one ESP32.  
@@ -154,7 +172,9 @@ The label is controlled through Serial commands:
 | :--- | :--- | :--- |
 | `r` | `0` | REST / relaxed hand |
 | `f` | `1` | FIST / closed hand |
-| `n` | `2` | No active label |
+| `u` | `2` | WRIST_UP / wrist extension |
+| `d` | `3` | WRIST_DOWN / wrist flexion |
+| `n` | `4` | No active label |
 
 Example Serial output:
 
@@ -182,9 +202,23 @@ r → REST
 f → FIST
 ```
 
+For the experimental four-class version, a separate dataset is recorded:
+
+```text
+emg_4classes_v1.csv
+
+For the experimental four-class version, a separate dataset is recorded:
+
+```text
+emg_4classes_v1.csv
+```
 The Python script trusts the command label from the recorder instead of relying on the ESP32 label.  
 This helps avoid label errors caused by Serial timing delays.
 
+```text
+v1.0 = stable REST/FIST + Gazebo gripper
+v1.1 = experimental 4-class recognition
+```
 ### Dataset File
 
 The expected dataset file is:
@@ -680,7 +714,19 @@ Mapping:
 | REST | `0.0` | Open gripper |
 | FIST | `0.15` | Close gripper |
 
+### Experimental ROS2 Four-Class Mode
+
+The ROS2 node can also run in an experimental four-class mode using the Random Forest model:
+
+```text
+REST
+FIST
+WRIST_UP
+WRIST_DOWN
 ---
+
+This mode uses the model:
+emg_4classes_rf_model_v1.joblib
 
 ## Creating the ROS2 Workspace
 
@@ -935,6 +981,12 @@ Publishing to: /gripper_controller/commands
 Opened serial port: /dev/ttyUSB0
 MQTT connected: localhost:1883
 ```
+
+```markdown
+For the experimental four-class ROS2 mode, the node loads:
+
+```text
+emg_4classes_rf_model_v1.joblib
 
 ---
 

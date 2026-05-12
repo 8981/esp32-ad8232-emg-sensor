@@ -1,10 +1,7 @@
 import math
 import serial
 import joblib
-import json
-import time
-
-import paho.mqtt.client as mqtt
+import numpy as np
 
 import rclpy
 from rclpy.node import Node
@@ -22,51 +19,42 @@ class EmgToGripperNode(Node):
         self.baud = 115200
 
         # -----------------------------
-        # ML model path
+        # Four-class Random Forest model
         # -----------------------------
         self.model_file = (
             "/mnt/d/Study/Sensormodalities/"
             "esp32-ad8232-emg-sensor/"
-            "model/rest_fist_model_v2.joblib"
+            "model/"
+            "emg_4classes_rf_model_v1.joblib"
         )
+
+        self.class_names = [
+            "REST",
+            "FIST",
+            "WRIST_UP",
+            "WRIST_DOWN"
+        ]
 
         # -----------------------------
         # Gazebo gripper command topic
         # -----------------------------
         self.cmd_topic = "/gripper_controller/commands"
 
+        # In this Gazebo gripper model:
+        # 0.0  = open
+        # 0.15 = closed
         self.open_value = 0.0
         self.close_value = 0.15
 
         # -----------------------------
-        # MQTT settings
+        # Multi-class decision parameters
         # -----------------------------
-        self.mqtt_host = "localhost"
-        self.mqtt_port = 1883
-        self.mqtt_topic = "emg/prediction"
-        self.mqtt_client = mqtt.Client()
-        self.mqtt_enabled = False
+        self.conf_threshold = 0.45
+        self.min_hits = 4
 
-        try:
-            self.mqtt_client.connect(self.mqtt_host, self.mqtt_port, 60)
-            self.mqtt_enabled = True
-            self.get_logger().info(
-                f"MQTT connected: {self.mqtt_host}:{self.mqtt_port}, topic={self.mqtt_topic}"
-            )
-        except Exception as e:
-            self.get_logger().warn(f"MQTT connection failed: {e}")
-
-        # -----------------------------
-        # Prediction smoothing
-        # -----------------------------
-        self.alpha = 0.2
-        self.th_fist = 0.62
-        self.th_rest = 0.48
-        self.min_hits = 3
-
-        self.state = 0
+        self.current_state = 0
+        self.candidate_state = None
         self.hits = 0
-        self.ema_p_fist = 0.0
 
         # -----------------------------
         # ROS publisher
@@ -78,9 +66,10 @@ class EmgToGripperNode(Node):
         )
 
         # -----------------------------
-        # Load model
+        # Load ML model
         # -----------------------------
         self.model = joblib.load(self.model_file)
+
         n_features = int(self.model.n_features_in_)
 
         if n_features != 12:
@@ -91,15 +80,18 @@ class EmgToGripperNode(Node):
         self.get_logger().info(f"Loaded model: {self.model_file}")
         self.get_logger().info(f"Model expects {n_features} features.")
         self.get_logger().info(f"Publishing to: {self.cmd_topic}")
+        self.get_logger().info("Experimental 4-class mode enabled.")
+        self.get_logger().info("REST/FIST control the gripper. WRIST_UP/WRIST_DOWN are logged only.")
 
         # -----------------------------
-        # Open serial
+        # Open Serial
         # -----------------------------
         self.ser = serial.Serial(self.port, self.baud, timeout=0.05)
         self.ser.reset_input_buffer()
 
         self.get_logger().info(f"Opened serial port: {self.port}")
 
+        # Send initial open command
         self.publish_gripper(self.open_value)
 
         # Timer loop: 100 Hz
@@ -108,6 +100,8 @@ class EmgToGripperNode(Node):
     def parse_line(self, line: str):
         parts = line.strip().split(",")
 
+        # v2 format:
+        # idx + 12 features + label = 14 columns
         if len(parts) != 14:
             return None
 
@@ -127,34 +121,25 @@ class EmgToGripperNode(Node):
         msg.data = [float(value)]
         self.pub.publish(msg)
 
-    def publish_mqtt_event(
-        self,
-        decision: str,
-        label: int,
-        command_value: float,
-        p_rest: float,
-        p_fist: float,
-        features
-    ):
-        if not self.mqtt_enabled:
-            return
+    def apply_state_to_gripper(self, state: int):
+        """
+        REST and FIST control the Gazebo gripper.
+        WRIST_UP and WRIST_DOWN are recognized but not mapped to the demo gripper.
+        """
 
-        payload = {
-            "prediction": decision,
-            "label": int(label),
-            "command_value": float(command_value),
-            "p_rest": float(p_rest),
-            "p_fist": float(p_fist),
-            "ema_fist": float(self.ema_p_fist),
-            "features": features,
-            "feature_count": len(features),
-            "timestamp": time.time()
-        }
+        if state == 0:
+            # REST
+            self.publish_gripper(self.open_value)
+            return self.open_value
 
-        self.mqtt_client.publish(
-            self.mqtt_topic,
-            json.dumps(payload)
-        )
+        if state == 1:
+            # FIST
+            self.publish_gripper(self.close_value)
+            return self.close_value
+
+        # WRIST_UP / WRIST_DOWN:
+        # no gripper command change in the current Gazebo demo
+        return None
 
     def update(self):
         line = self.ser.readline().decode(errors="ignore").strip()
@@ -172,56 +157,46 @@ class EmgToGripperNode(Node):
 
         proba = self.model.predict_proba([x])[0]
 
-        p_rest = float(proba[0])
-        p_fist = float(proba[1])
+        pred_class = int(np.argmax(proba))
+        confidence = float(np.max(proba))
 
-        self.ema_p_fist = (
-            self.alpha * p_fist
-            + (1.0 - self.alpha) * self.ema_p_fist
-        )
-
-        if self.state == 0:
-            cond = self.ema_p_fist >= self.th_fist
+        if confidence >= self.conf_threshold:
+            if self.candidate_state == pred_class:
+                self.hits += 1
+            else:
+                self.candidate_state = pred_class
+                self.hits = 1
         else:
-            cond = self.ema_p_fist <= self.th_rest
-
-        if cond:
-            self.hits += 1
-        else:
+            self.candidate_state = None
             self.hits = 0
 
         changed = False
 
         if self.hits >= self.min_hits:
-            self.state = 1 - self.state
+            if self.current_state != self.candidate_state:
+                self.current_state = self.candidate_state
+                changed = True
+
             self.hits = 0
-            changed = True
-
-        if self.state == 0:
-            decision = "REST"
-            command_value = self.open_value
-        else:
-            decision = "FIST"
-            command_value = self.close_value
-
-        self.publish_gripper(command_value)
 
         if changed:
-            self.get_logger().info(
-                f"State changed: {decision} | "
-                f"p_rest={p_rest:.3f} | "
-                f"p_fist={p_fist:.3f} | "
-                f"ema_fist={self.ema_p_fist:.3f} | "
-                f"cmd={command_value:.3f}"
+            command_value = self.apply_state_to_gripper(self.current_state)
+
+            probs_str = " | ".join(
+                f"{self.class_names[i]}={proba[i]:.2f}"
+                for i in range(len(self.class_names))
             )
 
-            self.publish_mqtt_event(
-                decision=decision,
-                label=self.state,
-                command_value=command_value,
-                p_rest=p_rest,
-                p_fist=p_fist,
-                features=x
+            if command_value is None:
+                command_text = "no gripper command"
+            else:
+                command_text = f"cmd={command_value:.3f}"
+
+            self.get_logger().info(
+                f"State changed: {self.class_names[self.current_state]} | "
+                f"conf={confidence:.2f} | "
+                f"{command_text} | "
+                f"{probs_str}"
             )
 
     def destroy_node(self):
