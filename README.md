@@ -1120,7 +1120,7 @@ Token	emg-token
 Default bucket	emg-bucket
 
 Recommended dashboard panels:
-
+```
 | Panel | InfluxDB Field | Grafana Visualization |
 | :--- | :--- | :--- |
 | FIST Probability | `p_fist` | Time series |
@@ -1130,7 +1130,7 @@ Recommended dashboard panels:
 | Current Label | `label |> last()` | Stat |
 | Current FIST Probability | `p_fist |> last()` | Gauge |
 | Latest Events | all fields | Table |
-```
+
 ## Running the Cloud IoT Stack
 
 Start the infrastructure:
@@ -1397,9 +1397,11 @@ usbipd attach --wsl --busid <BUSID>
 ```
 ```text
 Also check the device path inside:
+```
 
-real_hand/emg_to_real_hand_bridge.py
+`real_hand/emg_to_real_hand_bridge.py`
 
+```text
 The default is:
 ```
 
@@ -1412,9 +1414,10 @@ Real Hand Opens and Closes in the Wrong Direction
 If REST closes the hand and FIST opens it, the servo direction is reversed.
 
 Open:
-
+```bash
 nano real_hand/emg_to_real_hand_bridge.py
-
+```
+```text
 Swap the positions:
 ```
 ```python
