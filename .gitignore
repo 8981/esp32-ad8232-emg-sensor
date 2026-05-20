@@ -17,3 +17,9 @@ Thumbs.db
 # Large / generated artifacts
 *.bag
 *.db3
+
+# ML / YOLO model weights
+*.pt
+*.pth
+*.onnx
+*.engine

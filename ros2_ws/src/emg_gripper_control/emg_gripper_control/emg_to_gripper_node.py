@@ -8,7 +8,7 @@ import paho.mqtt.client as mqtt
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, Float64
 
 
 class EmgToGripperNode(Node):
@@ -78,6 +78,21 @@ class EmgToGripperNode(Node):
         )
 
         # -----------------------------
+        # Real hand command publisher
+        # -----------------------------
+        self.real_hand_topic = "/robot_hand/grip_command"
+
+        self.real_hand_pub = self.create_publisher(
+            Float64,
+            self.real_hand_topic,
+            10
+        )
+
+        self.get_logger().info(
+            f"Publishing real hand grip to: {self.real_hand_topic}"
+        )
+
+        # -----------------------------
         # Load model
         # -----------------------------
         self.model = joblib.load(self.model_file)
@@ -126,6 +141,18 @@ class EmgToGripperNode(Node):
         msg = Float64MultiArray()
         msg.data = [float(value)]
         self.pub.publish(msg)
+
+    def publish_real_hand_grip(self, grip_value: float):
+        """
+        Publishes command for the real robotic hand.
+
+        grip_value:
+        0.0 = open hand
+        1.0 = close hand
+        """
+        msg = Float64()
+        msg.data = float(grip_value)
+        self.real_hand_pub.publish(msg)
 
     def publish_mqtt_event(
         self,
@@ -215,6 +242,14 @@ class EmgToGripperNode(Node):
                 f"cmd={command_value:.3f}"
             )
 
+            # Publish command to the real robotic hand
+            if self.state == 0:
+                # REST -> open real hand
+                self.publish_real_hand_grip(0.0)
+            else:
+                # FIST -> close real hand
+                self.publish_real_hand_grip(1.0)
+
             self.publish_mqtt_event(
                 decision=decision,
                 label=self.state,
@@ -245,6 +280,7 @@ def main(args=None):
         pass
     finally:
         node.publish_gripper(node.open_value)
+        node.publish_real_hand_grip(0.0)
         node.destroy_node()
         rclpy.shutdown()
 

@@ -22,12 +22,14 @@ The final system classifies two hand states — **REST** and **FIST** — and us
 - **InfluxDB storage**: Stores prediction telemetry as time-series data.
 - **Grafana dashboard**: Visualizes prediction probability, smoothed probability, gripper commands, and predicted labels.
 - **Experimental four-class classification**: Tests REST, FIST, WRIST_UP, and WRIST_DOWN recognition as an experimental extension.
+- **Real robotic hand control**: Sends REST/FIST prediction commands to a real STServo-based robotic hand through a separate ROS2 bridge.
+- **Dual USB device support in WSL2**: Uses one serial device for ESP32 EMG acquisition and a second serial device for the robotic hand controller.
 
 ---
 
 ## Current Pipeline
 
-The current stable v1.0 implementation demonstrates a full real-time EMG-to-Gazebo and Cloud IoT pipeline.
+The current stable v1.0 implementation demonstrates a full real-time EMG-to-Gazebo, real robotic hand, and Cloud IoT pipeline.
 
 ```text
 ESP32 + 3x AD8232 EMG Sensors
@@ -37,24 +39,23 @@ Feature Extraction on ESP32
 REST/FIST Machine Learning Classification
         ↓
 ROS2 EMG Node
-        ↓
-Gazebo Gripper Control
-        ↓
-MQTT Streaming
-        ↓
-Kafka Streaming Pipeline
-        ↓
-InfluxDB Time-Series Storage
-        ↓
-Grafana Visualization
+        ├── Gazebo Gripper Control
+        ├── Real Robotic Hand Control
+        └── MQTT Streaming
+                ↓
+              Kafka
+                ↓
+              InfluxDB
+                ↓
+              Grafana
 ```
 
 The system classifies two hand states:
 
-| Class | Meaning | Gazebo Action |
-| :--- | :--- | :--- |
-| `0` | REST / relaxed hand | Open gripper |
-| `1` | FIST / closed hand | Close gripper |
+| Class | Meaning | Gazebo Action | Real Hand Action |
+| :--- | :--- | :--- | :--- |
+| `0` | REST / relaxed hand | Open gripper | Open robotic hand |
+| `1` | FIST / closed hand | Close gripper | Close robotic hand |
 
 In the tested Gazebo gripper model:
 
@@ -62,6 +63,13 @@ In the tested Gazebo gripper model:
 | :--- | :--- | :--- |
 | REST | Open | `0.0` |
 | FIST | Closed | `0.15` |
+
+For the real STServo-based robotic hand:
+
+| EMG State | Hand State | Real Hand Command |
+| :--- | :--- | :--- |
+| REST | Open | `0.0` |
+| FIST | Closed | `1.0` |
 
 ---
 
@@ -82,7 +90,34 @@ The dataset structure remains unchanged because the input feature vector is stil
 
 ```text
 m1,s1,a1,p1,m2,s2,a2,p2,m3,s3,a3,p3,label
+
 ```
+
+```text
+Only the label space was extended from two classes to four classes.
+
+Two models were tested for the four-class classification task:
+
+| Model | Accuracy |
+| :--- | :--- |
+| Logistic Regression | `0.52` |
+| Random Forest | `0.63` |
+
+The Random Forest model can recognize all four movement classes in real time, but occasional misclassifications occur, especially when movements are not performed clearly or when electrode pressure changes.
+
+The experimental four-class files are stored in the repository, but this version is not currently connected to the stable ROS2/Gazebo/Cloud/Real Hand pipeline.
+
+Current experimental files:
+
+data/emg_4classes_v1.csv
+model/emg_4classes_model_v1.joblib
+model/emg_4classes_rf_model_v1.joblib
+scripts/train/train_4classes_v1.py
+scripts/train/train_4classes_rf_v1.py
+scripts/predict/online_predict_4classes_rf_v1.py
+
+```
+
 ## Hardware Connections (ESP32 DevKit V1)
 
 This project uses **three AD8232 modules** connected to one ESP32.  
@@ -387,6 +422,7 @@ ESP32 + 3x AD8232
 | ROS-Gazebo packages | `ros_gz` |
 | Control packages | `ros2_control`, `ros2_controllers`, `gz_ros2_control` |
 | Serial device | ESP32 connected to WSL2 as `/dev/ttyUSB0` |
+| Serial device | STServo robotic hand controller connected to WSL2 as `/dev/ttyACM0` |
 
 ---
 
@@ -460,7 +496,7 @@ Example:
 
 ```text
 BUSID  VID:PID    DEVICE
-1-1    10c4:ea60  Silicon Labs CP210x USB to UART Bridge (COM3)
+1-1    10c4:ea60  Silicon Labs CP210x USB to UART Bridge (COM7)
 ```
 
 In this example, the BUSID is:
@@ -524,6 +560,43 @@ After restarting WSL, attach the device again:
 usbipd attach --wsl --busid 1-1
 ```
 
+### Attaching the Real Robotic Hand Controller
+
+The real robotic hand uses a separate USB serial controller for STServo communication.
+
+Therefore, two USB serial devices are required in WSL2:
+
+| Device | Expected WSL Port | Used By |
+| :--- | :--- | :--- |
+| ESP32 EMG controller | `/dev/ttyUSB0` | ROS2 EMG node |
+| STServo hand controller | `/dev/ttyACM0` | Real hand bridge |
+
+In Windows PowerShell as Administrator, list USB devices:
+
+```powershell
+usbipd list
+```
+```text
+Find the STServo controller device. It may appear as a USB Serial device, for example:
+
+USB Serial Device (COM8)
+
+Bind and attach it to WSL2:
+
+usbipd bind --force --busid <BUSID>
+usbipd attach --wsl --busid <BUSID>
+
+After attaching both ESP32 and the STServo controller, check devices in WSL2:
+
+ls /dev/ttyUSB* 2>/dev/null
+ls /dev/ttyACM* 2>/dev/null
+
+Expected result:
+
+/dev/ttyUSB0
+/dev/ttyUSB1
+
+```
 ---
 
 ## Testing Serial Input in WSL2
@@ -678,9 +751,69 @@ For this Gazebo gripper model:
 
 ---
 
+## Real Robotic Hand Integration
+
+In addition to Gazebo simulation, the project can control a real STServo-based robotic hand.
+
+The real hand is controlled through a separate bridge script:
+
+```text
+real_hand/emg_to_real_hand_bridge.py
+
+```
+
+### Testing the Real Hand Bridge
+
+Before running the full EMG system, the real hand bridge can be tested manually.
+
+### Terminal 1: Start Real Hand Bridge
+
+```bash
+cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor"
+
+source /opt/ros/jazzy/setup.bash
+
+python3 real_hand/emg_to_real_hand_bridge.py
+```
+```text
+Expected output:
+
+Connected to STServo on /dev/ttyUSB1
+Real hand bridge started.
+Listening topic: /robot_hand/grip_command
+0.0 = open, 1.0 = close
+```
+
+### Terminal 2: Send Manual Commands
+
+```bash
+source /opt/ros/jazzy/setup.bash
+```
+
+```text
+Open hand:
+```
+```bash
+ros2 topic pub --once /robot_hand/grip_command std_msgs/msg/Float64 "{data: 0.0}"
+```
+```text
+Close hand:
+```
+```bash
+ros2 topic pub --once /robot_hand/grip_command std_msgs/msg/Float64 "{data: 1.0}"
+```
+```text
+Half-closed position:
+```
+```bash
+ros2 topic pub --once /robot_hand/grip_command std_msgs/msg/Float64 "{data: 0.5}"
+```
+
+---
+
 ## ROS2 EMG-to-Gripper Node
 
-The ROS2 Python node reads EMG features from the ESP32, loads the trained machine learning model, predicts the current hand state, and publishes a gripper command to Gazebo.
+The ROS2 Python node reads EMG features from the ESP32, loads the trained machine learning model, predicts the current hand state, and publishes commands both to Gazebo and to the real robotic hand bridge.
 
 The node performs:
 
@@ -691,7 +824,8 @@ Serial read
 → model.predict_proba()
 → EMA smoothing
 → hysteresis decision
-→ publish Float64MultiArray command
+→ publish Float64MultiArray command to Gazebo
+→ publish Float64 grip command to the real hand bridge
 ```
 
 Main configuration:
@@ -704,6 +838,11 @@ CMD_TOPIC = "/gripper_controller/commands"
 
 OPEN_VALUE = 0.0
 CLOSE_VALUE = 0.15
+
+REAL_HAND_TOPIC = "/robot_hand/grip_command"
+
+REAL_HAND_OPEN = 0.0
+REAL_HAND_CLOSE = 1.0
 ```
 
 Prediction stabilization:
@@ -715,28 +854,48 @@ TH_REST = 0.48
 MIN_HITS = 3
 ```
 
-Mapping:
-
+Gazebo mapping:
+ 
 | Prediction | Command Value | Gazebo Action |
 | :--- | :--- | :--- |
 | REST | `0.0` | Open gripper |
 | FIST | `0.15` | Close gripper |
 
+Real hand mapping:
+
+| Prediction | Published Value | Real Hand Action |
+| :--- | :--- | :--- |
+| REST | `0.0` | Open hand |
+| FIST | `1.0` | Close hand |
+
 ### Experimental ROS2 Four-Class Mode
 
-The ROS2 node can also run in an experimental four-class mode using the Random Forest model:
+The repository also contains an experimental four-class Random Forest model:
 
 ```text
+emg_4classes_rf_model_v1.joblib
+
+Supported experimental classes:
+
 REST
 FIST
 WRIST_UP
 WRIST_DOWN
----
 
-This mode uses the model:
-```text
-emg_4classes_rf_model_v1.joblib
+This four-class mode is currently kept as an experimental part of the project.
+The stable ROS2/Gazebo/Cloud/Real Hand pipeline uses the REST/FIST model only.
+
+In the current Gazebo gripper demo and real robotic hand setup, only REST and FIST are mapped to physical movement:
+
+Prediction	Gazebo Action	        Real Hand Action
+REST	        Open gripper	        Open hand
+FIST	        Close gripper	        Close hand
+WRIST_UP	Not connected yet	Not connected yet
+WRIST_DOWN	Not connected yet	Not connected yet
+
+A future version may add a controllable wrist joint or additional robotic hand degrees of freedom to visualize WRIST_UP and WRIST_DOWN.
 ```
+
 ## Creating the ROS2 Workspace
 
 The ROS2 workspace is now integrated directly into the main project structure.
@@ -801,6 +960,63 @@ source install/setup.bash
 ```
 ---
 
+## Running EMG Control with the Real Robotic Hand Only
+
+This mode runs the physical robotic hand without Gazebo.
+
+Pipeline:
+
+```text
+ESP32 EMG
+→ ROS2 EMG Node
+→ /robot_hand/grip_command
+→ Real Hand Bridge
+→ STServo Controller
+→ Robotic Hand
+```
+### Terminal 1: Start Real Hand Bridge
+
+```bash
+cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor"
+
+source /opt/ros/jazzy/setup.bash
+
+python3 real_hand/emg_to_real_hand_bridge.py
+```
+
+### Terminal 2: Start EMG ROS2 Node
+
+```bash
+cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor/ros2_ws"
+
+source /opt/ros/jazzy/setup.bash
+source install/setup.bash
+
+ros2 run emg_gripper_control emg_to_gripper
+```
+
+```text
+Expected behavior:
+
+User Gesture	Prediction	Real Hand Command	Real Hand Action
+Relaxed hand	REST	        0.0	                Open
+Closed fist	FIST	        1.0	                Close
+```
+
+Optional debug command:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+
+ros2 topic echo /robot_hand/grip_command
+```
+
+```text
+Expected topic output:
+
+data: 0.0
+data: 1.0
+```
 ## MQTT Integration
 
 The ROS2 EMG node publishes gesture recognition events to an MQTT broker.
@@ -858,7 +1074,6 @@ Pipeline:
 Kafka Topic: emg_predictions
 → Kafka-InfluxDB Consumer
 → InfluxDB Bucket: emg-bucket
-```
 
 InfluxDB settings:
 
@@ -884,10 +1099,13 @@ timestamp_source
 The prediction class is stored as a tag:
 
 prediction
-Grafana Visualization
+```
+---
+## Grafana Visualization
 
 Grafana is used to visualize the real-time EMG prediction telemetry stored in InfluxDB.
 
+```text
 Grafana URL:
 
 http://localhost:3000
@@ -901,6 +1119,18 @@ Organization	emg-org
 Token	emg-token
 Default bucket	emg-bucket
 
+Recommended dashboard panels:
+
+| Panel | InfluxDB Field | Grafana Visualization |
+| :--- | :--- | :--- |
+| FIST Probability | `p_fist` | Time series |
+| Smoothed FIST Probability | `ema_fist` | Time series |
+| Gripper Command | `command_value` | State timeline |
+| Predicted Label | `label` | State timeline |
+| Current Label | `label |> last()` | Stat |
+| Current FIST Probability | `p_fist |> last()` | Gauge |
+| Latest Events | all fields | Table |
+```
 ## Running the Cloud IoT Stack
 
 Start the infrastructure:
@@ -908,14 +1138,13 @@ Start the infrastructure:
 ```bash
 docker compose -f cloud_iot/docker-compose.yml up -d
 ```
-
+```text
 Verify running containers:
-
+```
 ```bash
 docker ps
 ```
-
-```markdown
+```text
 Expected services:
 
 - Mosquitto MQTT broker
@@ -1041,6 +1270,18 @@ Waiting for Kafka messages...
 Written to InfluxDB: prediction=FIST, label=1, ...
 ```
 
+### Optional: Start Real Robotic Hand Bridge
+
+If the real robotic hand is connected, start the bridge before running the EMG node:
+
+```bash
+cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor"
+
+source /opt/ros/jazzy/setup.bash
+
+python3 real_hand/emg_to_real_hand_bridge.py
+```
+
 ### Terminal 6: Start the EMG ROS2 Node
 
 ```bash
@@ -1059,22 +1300,19 @@ Expected node output:
 Loaded model: rest_fist_model_v2.joblib
 Model expects 12 features.
 Publishing to: /gripper_controller/commands
-Opened serial port: /dev/ttyUSB0
+Publishing real hand grip to: /robot_hand/grip_command
+Opened serial port: /dev/ttyUSB0 and /dev/ttyACM0
 MQTT connected: localhost:1883
-```
 
-```markdown
 For the experimental four-class ROS2 mode, the node loads:
-```
-```text
+
 emg_4classes_rf_model_v1.joblib
 ```
 
 ### Terminal 7: Open Grafana Dashboard
-
+```text
 Open Grafana in the browser:
 
-```text
 http://localhost:3000
 ```
 ---
@@ -1135,6 +1373,67 @@ Then attach the USB device again:
 usbipd attach --wsl --busid 1-1
 ```
 
+### Real Hand Does Not Move
+
+Check that the STServo controller is attached to WSL2:
+
+```bash
+ls /dev/ttyUSB* 2>/dev/null
+ls /dev/ttyACM* 2>/dev/null
+```
+```text
+Expected devices:
+
+/dev/ttyUSB0
+/dev/ttyACM0
+
+If only /dev/ttyUSB0 is visible, the STServo controller is not attached to WSL2.
+Attach it from Windows PowerShell using:
+```
+```powershell
+usbipd list
+usbipd bind --force --busid <BUSID>
+usbipd attach --wsl --busid <BUSID>
+```
+```text
+Also check the device path inside:
+
+real_hand/emg_to_real_hand_bridge.py
+
+The default is:
+```
+
+```python
+self.device = "/dev/ttyACM0"
+```
+```text
+Real Hand Opens and Closes in the Wrong Direction
+
+If REST closes the hand and FIST opens it, the servo direction is reversed.
+
+Open:
+
+nano real_hand/emg_to_real_hand_bridge.py
+
+Swap the positions:
+```
+```python
+self.open_position = 2700
+self.close_position = 2000
+```
+```text
+or adjust them according to the real hand mechanics.
+
+Real Hand Serial Port Is Busy
+
+Only one script can use the STServo serial port at a time.
+
+Before running the bridge, stop:
+
+test_servo.py
+old servo test scripts
+any other process using /dev/ttyACM0
+```
 ---
 
 ### ROS2 Controller Manager Is Not Available
@@ -1184,10 +1483,33 @@ In the tested Gazebo gripper model:
 0.0  → open gripper
 0.15 → close gripper
 ```
-```markdown
-The stable v1.0 pipeline also streams prediction events to the Cloud IoT stack:
 
 ```text
+The same REST/FIST prediction is also published to the real robotic hand topic:
+
+/robot_hand/grip_command
+```
+
+```text
+Real hand command mapping:
+
+0.0 → open robotic hand
+1.0 → close robotic hand
+```
+
+```text
+The real hand is controlled through:
+
+ROS2 EMG Node
+→ /robot_hand/grip_command
+→ real_hand/emg_to_real_hand_bridge.py
+→ STServo Controller
+→ Robotic Hand
+```
+
+```text
+The stable v1.0 pipeline also streams prediction events to the Cloud IoT stack:
+
 ROS2 Node
 → MQTT Broker
 → MQTT-Kafka Bridge
