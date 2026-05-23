@@ -1281,6 +1281,87 @@ source /opt/ros/jazzy/setup.bash
 
 python3 real_hand/emg_to_real_hand_bridge.py
 ```
+### Optional Experimental: Start Computer Vision Object Tracking
+
+The computer vision module is currently experimental.  
+It detects a bottle using YOLO, estimates the object distance and horizontal offset from the camera center, and sends this information from Windows to WSL2 through UDP.
+
+This mode is used for assisted object alignment:
+
+```text
+Windows Camera
+→ YOLO Object Detection
+→ UDP JSON packet
+→ WSL2 UDP-to-ROS2 Bridge
+→ /vision/object_visible
+→ /vision/object_x_mm
+→ /vision/object_distance_mm
+→ Real Hand Bridge
+→ Tracking Servo
+```
+>**Note:** EMG still controls the hand opening and closing.
+>Computer vision only assists with object alignment/tracking.
+
+#### Terminal A: Start UDP Vision → ROS2 Bridge in WSL2
+
+```bash
+cd "/mnt/d/Study/Sensormodalities/esp32-ad8232-emg-sensor"
+
+source /opt/ros/jazzy/setup.bash
+source .venv_wsl/bin/activate
+
+python real_hand/udp_vision_to_ros_node.py
+```
+
+```text
+Expected output:
+
+UDP Vision → ROS2 bridge started.
+Listening UDP on port 5005
+Publishing:
+  /vision/object_visible
+  /vision/object_x_mm
+  /vision/object_distance_mm
+```
+
+#### Terminal B: Start Windows Vision Tracker
+```text
+Run this command from Windows PowerShell, not WSL2:
+```
+```powershell
+cd D:\Study\Sensormodalities\esp32-ad8232-emg-sensor
+
+.\.venv\Scripts\activate
+
+python real_hand\vision_object_tracker_udp_windows.py
+```
+```text
+The Windows vision script uses the camera and publishes object data through UDP to WSL2.
+
+The script estimates:
+```
+
+| Value |	Meaning |
+| :--- | :--- |
+| visible |	Whether the object is detected |
+| x_mm |	Horizontal offset from the camera center |
+| z_mm |	Estimated distance to the object |
+| width_mm |	Estimated object width |
+
+#### Optional Debug: Check Vision ROS2 Topics
+```text
+In a separate WSL2 terminal:
+```
+
+```bash
+source /opt/ros/jazzy/setup.bash
+
+ros2 topic echo /vision/object_visible
+
+ros2 topic echo /vision/object_x_mm
+
+ros2 topic echo /vision/object_distance_mm
+```
 
 ### Terminal 6: Start the EMG ROS2 Node
 
