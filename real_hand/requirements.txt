@@ -1,4 +1,5 @@
 pyserial
 opencv-python
+numpy
 ultralytics
-nump
+typeguard

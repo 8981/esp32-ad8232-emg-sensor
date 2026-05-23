@@ -46,24 +46,49 @@ class STServoController:
             self.connected = False
             print("Disconnected from STServo")
 
-    def move_to(self, position: int):
+    def move_servo(
+        self,
+        servo_id: int,
+        position: int,
+        min_position: int = 0,
+        max_position: int = 4095,
+        speed: int | None = None,
+        acc: int | None = None,
+    ):
         if not self.connected:
             raise RuntimeError("Controller is not connected")
 
         position = int(position)
+        position = max(min_position, min(max_position, position))
 
+        if speed is None:
+            speed = self.speed
+
+        if acc is None:
+            acc = self.acc
+
+        self.packet_handler.WritePosEx(
+            int(servo_id),
+            position,
+            int(speed),
+            int(acc),
+        )
+
+        print(f"Servo {servo_id} -> position {position}")
+
+    def move_to(self, position: int):
         min_pos = min(self.open_position, self.close_position)
         max_pos = max(self.open_position, self.close_position)
 
-        position = max(min_pos, min(max_pos, position))
-
-        self.packet_handler.WritePosEx(
-            self.servo_id,
-            position,
-            self.speed,
-            self.acc,
+        self.move_servo(
+            servo_id=self.servo_id,
+            position=position,
+            min_position=min_pos,
+            max_position=max_pos,
+            speed=self.speed,
+            acc=self.acc,
         )
-
+        
         print(f"Servo {self.servo_id} -> position {position}")
 
     def open_hand(self):

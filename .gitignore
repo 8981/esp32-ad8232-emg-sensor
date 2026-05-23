@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+.venv_wsl/
 
 # ROS2 / colcon generated files
 ros2_ws/build/
