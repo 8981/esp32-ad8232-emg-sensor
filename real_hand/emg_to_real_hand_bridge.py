@@ -21,8 +21,8 @@ class RealHandBridge(Node):
 
         # Use the values that work for your physical hand.
         # If the direction is wrong, swap them.
-        self.open_position = 2700
-        self.close_position = 2000
+        self.open_position = 2000
+        self.close_position = 1500
 
         # -----------------------------
         # Tracking servo settings
@@ -45,11 +45,11 @@ class RealHandBridge(Node):
         self.track_dead_zone_mm = 10.0
 
         # How aggressively servo reacts to object offset.
-        self.track_gain = 0.08
+        self.track_gain = 0.24
         self.count = 0
 
         # Maximum servo step per update.
-        self.track_max_step = 5
+        self.track_max_step = 10
 
         self.track_min_step = 1
 
@@ -80,8 +80,8 @@ class RealHandBridge(Node):
             position=self.track_center_position,
             min_position=self.track_min_position,
             max_position=self.track_max_position,
-            speed=150,
-            acc=5,
+            speed=1000,
+            acc=130,
         )
 
         self.last_grip = None
